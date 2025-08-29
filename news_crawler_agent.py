@@ -2,6 +2,7 @@
 import os
 import json
 import re
+import logging
 from typing import List, Dict, Callable, Any
 from urllib.parse import urljoin, urlparse
 import requests
@@ -26,6 +27,9 @@ load_dotenv('.env.dev')
 # 禁用 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 配置logger
+logger = logging.getLogger(__name__)
+
 def retry_decorator(max_retries=3, initial_delay=2, backoff_factor=2, exceptions=(Exception,)):
     """重试装饰器
     
@@ -47,14 +51,14 @@ def retry_decorator(max_retries=3, initial_delay=2, backoff_factor=2, exceptions
                 except exceptions as e:
                     retries += 1
                     if retries > max_retries:
-                        print(f"最大重试次数已用尽，最终异常: {str(e)}")
+                        logger.error(f"最大重试次数已用尽，最终异常: {str(e)}")
                         raise
                     
                     # 添加一些随机性避免同时请求
                     jitter = random.uniform(0, 0.5) * delay
                     sleep_time = delay + jitter
                     
-                    print(f"请求失败，进行第 {retries} 次重试，等待 {sleep_time:.2f} 秒... 异常: {str(e)}")
+                    logger.warning(f"请求失败，进行第 {retries} 次重试，等待 {sleep_time:.2f} 秒... 异常: {str(e)}")
                     time.sleep(sleep_time)
                     
                     # 指数退避
@@ -269,9 +273,9 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
             response.encoding = response.apparent_encoding or 'utf-8'
             return response.text
         else:
-            print(f"获取页面失败 {url}: HTTP {response.status_code}")
-            print(f"Response headers: {response.headers}")
-            print(f"Response content: {response.text[:500]}...")
+            logger.error(f"获取页面失败 {url}: HTTP {response.status_code}")
+            logger.debug(f"Response headers: {response.headers}")
+            logger.debug(f"Response content: {response.text[:500]}...")
             raise requests.RequestException(f"HTTP错误 {response.status_code}")
             
     def normalize_urls(self, urls: List[str], base_url: str) -> List[str]:
@@ -309,14 +313,14 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
             # 标准化URL
             normalized_urls = self.normalize_urls(raw_urls, base_url)
             
-            print(f"提取到 {len(raw_urls)} 个URL，标准化后 {len(normalized_urls)} 个")
+            logger.info(f"提取到 {len(raw_urls)} 个URL，标准化后 {len(normalized_urls)} 个")
             if len(raw_urls) > 0 and len(normalized_urls) > 0:
-                print(f"示例URL转换: {raw_urls[0]} -> {normalized_urls[0]}")
+                logger.debug(f"示例URL转换: {raw_urls[0]} -> {normalized_urls[0]}")
             
             return normalized_urls
             
         except Exception as e:
-            print(f"提取URL失败: {str(e)}")
+            logger.error(f"提取URL失败: {str(e)}")
             return []
             
     def clean_json_response(self, response_text: str) -> str:
@@ -374,7 +378,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                 unique_tags.append(tag)
         
         if len(unique_tags) != len(tags):
-            print(f"标签过滤: 原始标签 {tags} -> 有效标签 {unique_tags}")
+            logger.debug(f"标签过滤: 原始标签 {tags} -> 有效标签 {unique_tags}")
         
         return unique_tags
     
@@ -419,7 +423,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                     result = content_chain.invoke(html_content)
                     result = self.validate_and_fix_result(result, language)
                 except Exception as chain_error:
-                    print(f"LangChain处理失败 (尝试 {attempt + 1}/{max_retries}): {str(chain_error)}")
+                    logger.warning(f"LangChain处理失败 (尝试 {attempt + 1}/{max_retries}): {str(chain_error)}")
                     
                     # 如果LangChain失败，尝试直接调用LLM
                     try:
@@ -445,17 +449,17 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                         result = self.validate_and_fix_result(result, language)
                         
                     except Exception as direct_error:
-                        print(f"直接LLM调用也失败 (尝试 {attempt + 1}/{max_retries}): {str(direct_error)}")
+                        logger.warning(f"直接LLM调用也失败 (尝试 {attempt + 1}/{max_retries}): {str(direct_error)}")
                         if attempt < max_retries - 1:
                             time.sleep(2 ** attempt)  # 指数退避
                             continue
                         else:
-                            print("所有重试都失败了")
+                            logger.error("所有重试都失败了")
                             return None
                 
                 # 检查必要字段
                 if not result.get('title') or not result.get('summary'):
-                    print(f"提取内容缺少必要字段 (尝试 {attempt + 1}/{max_retries}): {result.keys()}")
+                    logger.warning(f"提取内容缺少必要字段 (尝试 {attempt + 1}/{max_retries}): {result.keys()}")
                     if attempt < max_retries - 1:
                         time.sleep(1)
                         continue
@@ -464,17 +468,17 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                 
                 # 如果不相关，返回None
                 if not result.get('is_relevant', False):
-                    print(f"新闻不相关，已过滤: {result.get('title', 'Unknown')}")
+                    logger.debug(f"新闻不相关，已过滤: {result.get('title', 'Unknown')}")
                     return None
                 
                 # 如果没有有效标签，也视为不相关
                 if not result.get('tags') or len(result.get('tags', [])) == 0:
-                    print(f"新闻没有有效标签，已过滤: {result.get('title', 'Unknown')}")
+                    logger.debug(f"新闻没有有效标签，已过滤: {result.get('title', 'Unknown')}")
                     return None
                     
                 # 处理可能缺失的发布日期
                 if not result.get('publish_date'):
-                    print("未提取到发布日期，将在保存时使用当前日期")
+                    logger.debug("未提取到发布日期，将在保存时使用当前日期")
                     
                 return {
                     "title": result['title'],
@@ -484,12 +488,12 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                 }
                 
             except Exception as e:
-                print(f"提取内容失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                logger.error(f"提取内容失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # 指数退避
                     continue
                 else:
-                    print("所有重试都失败了")
+                    logger.error("所有重试都失败了")
                     return None
         
         return None
@@ -521,13 +525,13 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                     existing_urls = conn.execute(check_query, params).fetchall()
                     existing_url_set.update(row[0] for row in existing_urls)
             except Exception as e:
-                print(f"检查URL批次失败: {str(e)}")
+                logger.error(f"检查URL批次失败: {str(e)}")
                 continue
             
         # 返回不存在的URL
         new_urls = [url for url in urls if url not in existing_url_set]
         
-        print(f"URL检查结果: 总共{len(urls)}个, 已存在{len(existing_url_set)}个, 新增{len(new_urls)}个")
+        logger.info(f"URL检查结果: 总共{len(urls)}个, 已存在{len(existing_url_set)}个, 新增{len(new_urls)}个")
         return new_urls
 
     def save_to_db(self, news_data: Dict, source: Dict):
@@ -539,7 +543,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
         if not news_data.get("publish_date"):
             current_date = datetime.now().strftime("%Y-%m-%d")
             news_data["publish_date"] = current_date
-            print(f"未找到发布日期，使用当前日期: {current_date}")
+            logger.debug(f"未找到发布日期，使用当前日期: {current_date}")
         
         # 将标签转换为字符串
         tags_str = ", ".join(news_data.get("tags", []))
@@ -564,9 +568,9 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
             with self.engine.connect() as conn:
                 conn.execute(insert_query, data)
                 conn.commit()
-                print(f"成功保存新闻: {data['title']} - 标签: {tags_str}")
+                logger.info(f"成功保存新闻: {data['title']} - 标签: {tags_str}")
         except Exception as e:
-            print(f"保存新闻失败 {data['url']}: {str(e)}")
+            logger.error(f"保存新闻失败 {data['url']}: {str(e)}")
                 
     def process_news_url(self, url: str, source: Dict):
         """处理单个新闻URL"""
@@ -579,7 +583,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                     source_with_url["url"] = url
                     self.save_to_db(news_data, source_with_url)
         except Exception as e:
-            print(f"处理新闻URL失败 {url}: {str(e)}")
+            logger.error(f"处理新闻URL失败 {url}: {str(e)}")
                 
     def crawl_news(self, source: Dict):
         """爬取单个来源的新闻
@@ -596,16 +600,16 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
             # 提取新闻URL列表，并处理相对路径
             news_urls = self.extract_news_urls(html_content, source["url"])
             if not news_urls:
-                print(f"未提取到新闻URL: {source['source']}")
+                logger.warning(f"未提取到新闻URL: {source['source']}")
                 return
                 
             # 检查哪些URL是新的（未爬取过的）
             new_urls = self.check_urls_exist(news_urls)
             if not new_urls:
-                print(f"所有新闻URL都已存在，跳过: {source['source']}")
+                logger.info(f"所有新闻URL都已存在，跳过: {source['source']}")
                 return
                 
-            print(f"开始处理 {len(new_urls)} 个新URL，来源: {source['source']}")
+            logger.info(f"开始处理 {len(new_urls)} 个新URL，来源: {source['source']}")
             
             # 串行处理新的新闻URL
             for url in new_urls:
@@ -614,11 +618,11 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                     # 添加短暂延迟，避免请求过于频繁
                     time.sleep(1)
                 except Exception as e:
-                    print(f"处理新闻URL失败 {url}: {str(e)}")
+                    logger.error(f"处理新闻URL失败 {url}: {str(e)}")
                     continue
                 
         except Exception as e:
-            print(f"爬取失败 {source['source']}: {str(e)}")
+            logger.error(f"爬取失败 {source['source']}: {str(e)}")
             
     def get_source_list(self) -> List[Dict]:
         """从数据库获取需要爬取的网站列表"""
@@ -644,15 +648,15 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
     def crawl_all(self):
         """爬取所有来源的新闻"""
         sources = self.get_source_list()
-        print(f"找到 {len(sources)} 个新闻源需要处理")
+        logger.info(f"找到 {len(sources)} 个新闻源需要处理")
         
         for i, source in enumerate(sources, 1):
             try:
-                print(f"\n[{i}/{len(sources)}] 开始处理新闻源: {source['source']}")
+                logger.info(f"[{i}/{len(sources)}] 开始处理新闻源: {source['source']}")
                 self.crawl_news(source)
-                print(f"[{i}/{len(sources)}] 完成处理新闻源: {source['source']}")
+                logger.info(f"[{i}/{len(sources)}] 完成处理新闻源: {source['source']}")
             except Exception as e:
-                print(f"爬取来源失败 {source['source']}: {str(e)}")
+                logger.error(f"爬取来源失败 {source['source']}: {str(e)}")
                 continue
 
 
@@ -664,8 +668,8 @@ def main():
     api_key = os.getenv("DASHSCOPE_API_KEY")
     
     if not api_key:
-        print("❌ 错误: 请设置环境变量 DASHSCOPE_API_KEY")
-        print("示例: export DASHSCOPE_API_KEY='your_api_key_here'")
+        logger.error("❌ 错误: 请设置环境变量 DASHSCOPE_API_KEY")
+        logger.error("示例: export DASHSCOPE_API_KEY='your_api_key_here'")
         return
     
     # 检查数据库配置
@@ -674,21 +678,21 @@ def main():
     db_database = os.getenv("DB_DATABASE")
     
     if not db_host or not db_database:
-        print("❌ 错误: 请确保设置了数据库环境变量")
-        print("需要的变量: DB_TYPE, DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD")
+        logger.error("❌ 错误: 请确保设置了数据库环境变量")
+        logger.error("需要的变量: DB_TYPE, DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD")
         return
     
-    print("🚀 开始初始化新闻爬虫...")
-    print(f"📊 使用数据库: {db_type}://{db_host}/{db_database}")
-    print(f"🤖 使用模型: qwen-plus-latest")
+    logger.info("🚀 开始初始化新闻爬虫...")
+    logger.info(f"📊 使用数据库: {db_type}://{db_host}/{db_database}")
+    logger.info(f"🤖 使用模型: qwen-plus-latest")
     
     try:
         # 创建爬虫实例，自动从环境变量读取配置
         agent = NewsCrawlerAgent()
         
-        print("\n✅ 爬虫初始化成功！")
-        print("📰 开始执行新闻爬取任务...")
-        print("=" * 50)
+        logger.info("✅ 爬虫初始化成功！")
+        logger.info("📰 开始执行新闻爬取任务...")
+        logger.info("=" * 50)
         
         start_time = datetime.now()
         
@@ -698,15 +702,15 @@ def main():
         end_time = datetime.now()
         duration = end_time - start_time
         
-        print("=" * 50)
-        print(f"🎉 爬取任务完成!")
-        print(f"⏱️  总耗时: {duration}")
-        print(f"📅 完成时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("=" * 50)
+        logger.info(f"🎉 爬取任务完成!")
+        logger.info(f"⏱️  总耗时: {duration}")
+        logger.info(f"📅 完成时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
     except KeyboardInterrupt:
-        print("\n⚠️  用户中断了爬取任务")
+        logger.info("⚠️  用户中断了爬取任务")
     except Exception as e:
-        print(f"❌ 爬取过程中发生错误: {str(e)}")
+        logger.error(f"❌ 爬取过程中发生错误: {str(e)}")
         import traceback
         traceback.print_exc()
 

@@ -1,12 +1,16 @@
 """新闻爬虫实现"""
 import os
+import logging
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from .news_crawler_agent import NewsCrawlerAgent
+from news_crawler_agent import NewsCrawlerAgent
 
 # 加载环境变量
 load_dotenv('.env.dev')
+
+# 配置logger
+logger = logging.getLogger(__name__)
 
 class NewsCrawler:
     """新闻爬虫类"""
@@ -44,7 +48,7 @@ class NewsCrawler:
         
         # 立即执行一次爬取
         if run_immediately:
-            print("立即执行一次爬取任务...")
+            logger.info("立即执行一次爬取任务...")
             self.crawl_all()
         
     def stop(self):
