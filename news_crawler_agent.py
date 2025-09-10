@@ -248,7 +248,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
         language_chains = {
             'en': self.english_chain,                    # 英文
             'zh-hk': self.traditional_chinese_chain,     # 繁体中文（香港）
-            'zh': self.simplified_chinese_chain          # 简体中文
+            'zh-cn': self.simplified_chinese_chain       # 简体中文
         }
         return language_chains.get(language, self.simplified_chinese_chain)
     
@@ -341,7 +341,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
         tag_mappings = {
             'en': ['Legislation', 'Policy', 'HKICPA', 'ACCA'],
             'zh-hk': ['立法', '政策', 'HKICPA', 'ACCA'],  # 繁体中文（香港）
-            'zh': ['立法', '政策', 'HKICPA', 'ACCA']      # 简体中文
+            'zh-cn': ['立法', '政策', 'HKICPA', 'ACCA']   # 简体中文
         }
         return tag_mappings.get(language, ['立法', '政策', 'HKICPA', 'ACCA'])
     
@@ -382,7 +382,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
         
         return unique_tags
     
-    def validate_and_fix_result(self, result: Dict, language: str = 'zh') -> Dict:
+    def validate_and_fix_result(self, result: Dict, language: str = 'zh-cn') -> Dict:
         """验证和修复提取结果"""
         # 确保必要字段存在
         validated_result = {
@@ -409,7 +409,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
         
         return validated_result
     
-    def extract_news_content(self, html_content: str, language: str = 'zh') -> Dict:
+    def extract_news_content(self, html_content: str, language: str = 'zh-cn') -> Dict:
         """使用LLM提取和过滤新闻内容，带有重试和容错机制"""
         max_retries = 3
         
@@ -432,7 +432,7 @@ IMPORTANT: You must return ONLY valid JSON format. Do not include any additional
                             prompt_template = self.english_filter_prompt
                         elif language == 'zh-hk':
                             prompt_template = self.traditional_chinese_filter_prompt
-                        else:  # zh 默认简体中文
+                        else:  # zh-cn 默认简体中文
                             prompt_template = self.simplified_chinese_filter_prompt
                         
                         formatted_prompt = prompt_template.format(html_content=html_content)
